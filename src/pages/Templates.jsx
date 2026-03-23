@@ -1,24 +1,24 @@
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Tabs, TabPane, Banner, Steps } from "@douyinfe/semi-ui";
 import { IconDeleteStroked } from "@douyinfe/semi-icons";
-import { db } from "../data/db";
-import { useLiveQuery } from "dexie-react-hooks";
+import { getTemplates, deleteTemplate } from "../api/templates";
 import Thumbnail from "../components/Thumbnail";
 import logo_light from "../assets/logo_light_160.png";
 import template_screenshot from "../assets/template_screenshot.png";
 
 export default function Templates() {
-  const defaultTemplates = useLiveQuery(() =>
-    db.templates.where({ custom: 0 }).toArray(),
-  );
+  const [defaultTemplates, setDefaultTemplates] = useState([]);
+  const [customTemplates, setCustomTemplates] = useState([]);
 
-  const customTemplates = useLiveQuery(() =>
-    db.templates.where({ custom: 1 }).toArray(),
-  );
+  useEffect(() => {
+    getTemplates(0).then(setDefaultTemplates).catch(console.error);
+    getTemplates(1).then(setCustomTemplates).catch(console.error);
+  }, []);
 
-  const deleteTemplate = async (id) => {
-    await db.templates.delete(id);
+  const handleDeleteTemplate = async (templateId) => {
+    await deleteTemplate(templateId);
+    setCustomTemplates((prev) => prev.filter((t) => t.templateId !== templateId));
   };
 
   const forkTemplate = (id) => {
@@ -65,7 +65,7 @@ export default function Templates() {
               <div className="grid xl:grid-cols-3 grid-cols-2 sm:grid-cols-1 gap-10 my-6">
                 {defaultTemplates?.map((t, i) => (
                   <div
-                    key={t.id}
+                    key={t.templateId}
                     className="bg-gray-100 hover:translate-y-[-6px] transition-all duration-300 border rounded-md"
                   >
                     <div className="h-48">
@@ -102,7 +102,7 @@ export default function Templates() {
                 <div className="grid xl:grid-cols-3 grid-cols-2 sm:grid-cols-1 gap-8 my-6">
                   {customTemplates?.map((c, i) => (
                     <div
-                      key={c.id}
+                      key={c.templateId}
                       className="bg-gray-100 hover:translate-y-[-6px] transition-all duration-300 border rounded-md"
                     >
                       <div className="h-48">
@@ -125,7 +125,7 @@ export default function Templates() {
                         <div className="flex justify-around mt-2">
                           <button
                             className="w-full text-center flex justify-center items-center border rounded-sm px-2 py-1 bg-white hover:bg-gray-200 transition-all duration-300 text-red-500"
-                            onClick={() => deleteTemplate(c.id)}
+                            onClick={() => handleDeleteTemplate(c.templateId)}
                           >
                             <IconDeleteStroked />
                             <div className="ms-1.5 font-semibold">Delete</div>

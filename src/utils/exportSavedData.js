@@ -1,35 +1,36 @@
 import JSZip from "jszip";
-import { db } from "../data/db";
 import { saveAs } from "file-saver";
-
-const zip = new JSZip();
+import { getDiagramsFull } from "../api/diagrams";
+import { getTemplates } from "../api/templates";
 
 export async function exportSavedData() {
-  const diagramsFolder = zip.folder("diagrams");
+  const zip = new JSZip();
 
-  await db.diagrams.each((diagram) => {
+  const [diagrams, customTemplates] = await Promise.all([
+    getDiagramsFull(),
+    getTemplates(1),
+  ]);
+
+  const diagramsFolder = zip.folder("diagrams");
+  for (const diagram of diagrams) {
     diagramsFolder.file(
-      `${diagram.name}(${diagram.id}).json`,
+      `${diagram.name}(${diagram.diagramId}).json`,
       JSON.stringify(diagram, null, 2),
     );
-    return true;
-  });
+  }
 
   const templatesFolder = zip.folder("templates");
-
-  await db.templates.where({ custom: 1 }).each((template) => {
+  for (const template of customTemplates) {
     templatesFolder.file(
-      `${template.title}(${template.id}).json`,
+      `${template.title}(${template.templateId}).json`,
       JSON.stringify(template, null, 2),
     );
-    return true;
-  });
+  }
 
-  zip.generateAsync({ type: "blob" }).then(function (content) {
-    const date = new Date();
-    saveAs(
-      content,
-      `${date.getFullYear()}_${date.getMonth()}_${date.getDay()}_export.zip`,
-    );
-  });
+  const content = await zip.generateAsync({ type: "blob" });
+  const date = new Date();
+  saveAs(
+    content,
+    `${date.getFullYear()}_${date.getMonth()}_${date.getDay()}_export.zip`,
+  );
 }

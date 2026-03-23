@@ -4,7 +4,14 @@ import Canvas from "./EditorCanvas/Canvas";
 import { CanvasContextProvider } from "../context/CanvasContext";
 import SidePanel from "./EditorSidePanel/SidePanel";
 import { DB, State } from "../data/constants";
-import { db } from "../data/db";
+import {
+  createDiagram,
+  updateDiagram,
+  getLatestDiagram,
+  getDiagram,
+  getDiagramByGistId,
+} from "../api/diagrams";
+import { getTemplate } from "../api/templates";
 import {
   useLayout,
   useSettings,
@@ -90,53 +97,46 @@ export default function WorkSpace() {
       setSearchParams(searchParams, { replace: true });
     }
 
-    if (isTemplate || (!loadedDiagramId && !isTemplate && !isDiagram)) {
-      const diagramId = crypto.randomUUID();
-      await db.diagrams
-        .add({
-          diagramId,
+    try {
+      if (isTemplate || (!loadedDiagramId && !isTemplate && !isDiagram)) {
+        const { diagramId } = await createDiagram({
           database: database,
           name: title,
-          gistId: gistId ?? "",
-          lastModified: new Date(),
+          gistId: gistId ?? null,
+          loadedFromGistId: loadedFromGistId || null,
           tables: tables,
           references: relationships,
           notes: notes,
           areas: areas,
           pan: transform.pan,
           zoom: transform.zoom,
-          loadedFromGistId: loadedFromGistId,
           ...(databases[database].hasEnums && { enums: enums }),
           ...(databases[database].hasTypes && { types: types }),
-        })
-        .then(() => {
-          navigate(`/editor/diagrams/${diagramId}`, { replace: true });
-          setSaveState(State.SAVED);
-          setLastSaved(new Date().toLocaleString());
         });
-    } else {
-      await db.diagrams
-        .where("diagramId")
-        .equals(loadedDiagramId)
-        .modify({
+        navigate(`/editor/diagrams/${diagramId}`, { replace: true });
+        setSaveState(State.SAVED);
+        setLastSaved(new Date().toLocaleString());
+      } else {
+        await updateDiagram(loadedDiagramId, {
           database: database,
           name: title,
-          lastModified: new Date(),
           tables: tables,
           references: relationships,
           notes: notes,
           areas: areas,
-          gistId: gistId ?? "",
+          gistId: gistId ?? null,
           pan: transform.pan,
           zoom: transform.zoom,
-          loadedFromGistId: loadedFromGistId,
+          loadedFromGistId: loadedFromGistId || null,
           ...(databases[database].hasEnums && { enums: enums }),
           ...(databases[database].hasTypes && { types: types }),
-        })
-        .then(() => {
-          setSaveState(State.SAVED);
-          setLastSaved(new Date().toLocaleString());
         });
+        setSaveState(State.SAVED);
+        setLastSaved(new Date().toLocaleString());
+      }
+    } catch (e) {
+      console.error(e);
+      setSaveState(State.ERROR);
     }
   }, [
     searchParams,
@@ -161,64 +161,61 @@ export default function WorkSpace() {
 
   const load = useCallback(async () => {
     const loadLatestDiagram = async () => {
-      await db.diagrams
-        .orderBy("lastModified")
-        .last()
-        .then((diagram) => {
-          if (diagram) {
-            if (diagram.database) {
-              setDatabase(diagram.database);
-            } else {
-              setDatabase(DB.GENERIC);
-            }
-            setGistId(diagram.gistId);
-            setLoadedFromGistId(diagram.loadedFromGistId);
-            setTitle(diagram.name);
-            setTables(diagram.tables);
-            setRelationships(diagram.references);
-            setNotes(diagram.notes);
-            setAreas(diagram.areas);
-            setTransform({ pan: diagram.pan, zoom: diagram.zoom });
-            if (databases[database].hasTypes) {
-              if (diagram.types) {
-                setTypes(
-                  diagram.types.map((t) =>
-                    t.id
-                      ? t
-                      : {
-                          ...t,
-                          id: nanoid(),
-                          fields: t.fields.map((f) =>
-                            f.id ? f : { ...f, id: nanoid() },
-                          ),
-                        },
-                  ),
-                );
-              } else {
-                setTypes([]);
-              }
-            }
-            if (databases[database].hasEnums) {
-              setEnums(
-                diagram.enums.map((e) =>
-                  !e.id ? { ...e, id: nanoid() } : e,
-                ) ?? [],
-              );
-            }
-            navigate(`/editor/diagrams/${diagram.diagramId}`, {
-              replace: true,
-            });
+      try {
+        const diagram = await getLatestDiagram();
+        if (diagram) {
+          if (diagram.database) {
+            setDatabase(diagram.database);
           } else {
-            if (selectedDb === "") setShowSelectDbModal(true);
+            setDatabase(DB.GENERIC);
           }
-        })
-        .catch((error) => {
-          console.log(error);
-        });
+          setGistId(diagram.gistId);
+          setLoadedFromGistId(diagram.loadedFromGistId);
+          setTitle(diagram.name);
+          setTables(diagram.tables);
+          setRelationships(diagram.references);
+          setNotes(diagram.notes);
+          setAreas(diagram.areas);
+          setTransform({ pan: diagram.pan, zoom: diagram.zoom });
+          if (databases[database].hasTypes) {
+            if (diagram.types) {
+              setTypes(
+                diagram.types.map((t) =>
+                  t.id
+                    ? t
+                    : {
+                        ...t,
+                        id: nanoid(),
+                        fields: t.fields.map((f) =>
+                          f.id ? f : { ...f, id: nanoid() },
+                        ),
+                      },
+                ),
+              );
+            } else {
+              setTypes([]);
+            }
+          }
+          if (databases[database].hasEnums) {
+            setEnums(
+              diagram.enums.map((e) =>
+                !e.id ? { ...e, id: nanoid() } : e,
+              ) ?? [],
+            );
+          }
+          navigate(`/editor/diagrams/${diagram.diagramId}`, {
+            replace: true,
+          });
+        } else {
+          if (selectedDb === "") setShowSelectDbModal(true);
+        }
+      } catch (error) {
+        console.log(error);
+      }
     };
 
     const loadDiagram = async (id) => {
-      const diagram = await db.diagrams.where("diagramId").equals(id).first();
+      const diagram = await getDiagram(id);
 
       if (!diagram) return;
 
@@ -267,10 +264,7 @@ export default function WorkSpace() {
     };
 
     const loadTemplate = async (id) => {
-      const template = await db.templates
-        .where("templateId")
-        .equals(id)
-        .first();
+      const template = await getTemplate(id);
 
       if (template) {
         if (template.database) {
@@ -376,10 +370,7 @@ export default function WorkSpace() {
 
     const shareId = searchParams.get("shareId");
     if (shareId) {
-      const existingDiagram = await db.diagrams.get({
-        loadedFromGistId: shareId,
-      });
-
+      const existingDiagram = await getDiagramByGistId(shareId);
       await loadFromGist(shareId, existingDiagram?.diagramId || null);
       return;
     }

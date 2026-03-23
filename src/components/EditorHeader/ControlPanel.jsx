@@ -1,4 +1,4 @@
-import { useContext, useState } from "react";
+import { useContext, useState, useEffect } from "react";
 import {
   IconCaretdown,
   IconChevronRight,
@@ -49,7 +49,8 @@ import jsPDF from "jspdf";
 import { useHotkeys } from "react-hotkeys-hook";
 import { Validator } from "jsonschema";
 import { areaSchema, noteSchema, tableSchema } from "../../data/schemas";
-import { db } from "../../data/db";
+import { getDiagrams, deleteDiagram } from "../../api/diagrams";
+import { createTemplate } from "../../api/templates";
 import {
   useLayout,
   useSettings,
@@ -83,7 +84,6 @@ import { exportSavedData } from "../../utils/exportSavedData";
 import { nanoid } from "nanoid";
 import { getTableHeight } from "../../utils/utils";
 import { deleteFromCache, STORAGE_KEY } from "../../utils/cache";
-import { useLiveQuery } from "dexie-react-hooks";
 import { DateTime } from "luxon";
 import ConfigureCustomTypes from "./ConfigureCustomTypes";
 
@@ -749,9 +749,13 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
     setLayout((prev) => ({ ...prev, dbmlEditor: !prev.dbmlEditor }));
   };
   const save = () => setSaveState(State.SAVING);
-  const recentlyOpenedDiagrams = useLiveQuery(() =>
-    db.diagrams.orderBy("lastModified").reverse().limit(10).toArray(),
-  );
+  const [recentlyOpenedDiagrams, setRecentlyOpenedDiagrams] = useState([]);
+
+  useEffect(() => {
+    getDiagrams()
+      .then((diagrams) => setRecentlyOpenedDiagrams(diagrams.slice(0, 10)))
+      .catch(console.error);
+  }, []);
 
   const open = () => setModal(MODAL.OPEN);
   const saveDiagramAs = () => setModal(MODAL.SAVEAS);
@@ -810,22 +814,18 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
       },
       save_as_template: {
         function: async () => {
-          await db.templates
-            .add({
-              title: title,
-              tables: tables,
-              database: database,
-              relationships: relationships,
-              notes: notes,
-              subjectAreas: areas,
-              custom: 1,
-              templateId: crypto.randomUUID(),
-              ...(databases[database].hasEnums && { enums: enums }),
-              ...(databases[database].hasTypes && { types: types }),
-            })
-            .then(() => {
-              Toast.success(t("template_saved"));
-            });
+          await createTemplate({
+            title: title,
+            tables: tables,
+            database: database,
+            relationships: relationships,
+            notes: notes,
+            subjectAreas: areas,
+            ...(databases[database].hasEnums && { enums: enums }),
+            ...(databases[database].hasTypes && { types: types }),
+          }).then(() => {
+            Toast.success(t("template_saved"));
+          });
         },
       },
       rename: {
@@ -840,10 +840,7 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
           message: t("are_you_sure_delete_diagram"),
         },
         function: async () => {
-          await db.diagrams
-            .where("diagramId")
-            .equals(diagramId)
-            .delete()
+          await deleteDiagram(diagramId)
             .then(() => {
               setTitle("Untitled diagram");
               setTables([]);
